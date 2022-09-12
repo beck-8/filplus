@@ -11,7 +11,7 @@ func main() {
 	app := &cli.App{
 		Name:    "query",
 		Usage:   "A tool to query datacap",
-		Version: "0.0.1",
+		Version: UserVersion(),
 		Commands: []*cli.Command{
 			query,
 		},
