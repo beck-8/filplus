@@ -75,6 +75,9 @@ var sum = &cli.Command{
 			}
 		}
 
+		clients := ConvertStrSlice2Map(strings.Split(ctx.String("client"), ","))
+		sps := ConvertStrSlice2Map(strings.Split(ctx.String("sp"), ","))
+
 		file := ctx.String("file")
 		deal := Deal{}
 		f, err := ioutil.ReadFile(file)
@@ -102,18 +105,19 @@ var sum = &cli.Command{
 			sectorStartEpoch := int64(v.State.SectorStartEpoch)
 
 			if v.Proposal.VerifiedDeal && sectorStartEpoch != -1 {
-				if strings.Contains(ctx.String("sp"), provider) && strings.Contains(ctx.String("client"), client) {
-					if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
-						if _, ok := sp_deal[provider]; ok {
-							sp_deal[provider][client] += int64(pieceSize)
-						} else {
-							sp_deal[provider] = map[string]int64{}
-							sp_deal[provider][client] += int64(pieceSize)
-						}
-						totalDc += int64(pieceSize)
-					}
-
+				if !ContainsInMap(sps, provider) && !ContainsInMap(clients, client) {
+					continue
 				}
+				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
+					if _, ok := sp_deal[provider]; ok {
+						sp_deal[provider][client] += int64(pieceSize)
+					} else {
+						sp_deal[provider] = map[string]int64{}
+						sp_deal[provider][client] += int64(pieceSize)
+					}
+					totalDc += int64(pieceSize)
+				}
+
 			}
 
 		}
@@ -141,4 +145,19 @@ func timeToHeight(text string) (int64, error) {
 		return 0, err
 	}
 	return (stamp.Unix() - bootstrapTime) / 30, nil
+}
+
+// ConvertStrSlice2Map 将字符串 slice 转为 map[string]struct{}
+func ConvertStrSlice2Map(sl []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(sl))
+	for _, v := range sl {
+		set[v] = struct{}{}
+	}
+	return set
+}
+
+// ContainsInMap 判断字符串是否在 map 中
+func ContainsInMap(m map[string]struct{}, s string) bool {
+	_, ok := m[s]
+	return ok
 }
