@@ -101,8 +101,7 @@ var sum = &cli.Command{
 			pieceSize := v.Proposal.PieceSize
 			sectorStartEpoch := int64(v.State.SectorStartEpoch)
 
-			//if !v.Proposal.VerifiedDeal && sectorStartEpoch != -1 {
-			if sectorStartEpoch != 1 {
+			if !v.Proposal.VerifiedDeal && sectorStartEpoch != -1 {
 				if strings.Contains(ctx.String("sp"), provider) && strings.Contains(ctx.String("client"), client) {
 					if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
 						if _, ok := sp_deal[provider]; ok {
