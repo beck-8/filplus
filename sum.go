@@ -1,9 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"github.com/filecoin-project/go-state-types/builtin/v9/market"
+	"github.com/buger/jsonparser"
 	"github.com/urfave/cli/v2"
 	"io/ioutil"
 	"os"
@@ -11,17 +10,6 @@ import (
 	"text/tabwriter"
 	"time"
 )
-
-type MarketDeal struct {
-	Proposal market.DealProposal
-	State    market.DealState
-}
-
-type Deal struct {
-	JsonRpc string                 `json:"jsonrpc"`
-	Result  map[string]*MarketDeal `json:"result"`
-	Id      int                    `json:"id"`
-}
 
 var sum = &cli.Command{
 	Name:  "calculate",
@@ -79,12 +67,7 @@ var sum = &cli.Command{
 		sps := ConvertStrSlice2Map(strings.Split(ctx.String("sp"), ","))
 
 		file := ctx.String("file")
-		deal := Deal{}
 		f, err := ioutil.ReadFile(file)
-		if err != nil {
-			return err
-		}
-		err = json.Unmarshal(f, &deal)
 		if err != nil {
 			return err
 		}
@@ -95,19 +78,32 @@ var sum = &cli.Command{
 		w := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
 			0)
 		fmt.Fprint(w, "client\tsp\tdatacap(T)\n")
-		var totalDc int64
+		var totalDc float64
 
-		for _, v := range deal.Result {
+		//其他json解析方式性能低下，使用jsonparser库8.3G文件花费49s，原生花费4m；python3 原生 3m+,orjson 2m48s。
+		err = jsonparser.ObjectEach(f, func(key []byte, value []byte, dataType jsonparser.ValueType, offset int) error {
+			provider, err := jsonparser.GetString(value, "Proposal", "Provider")
+			if err != nil {
+				return err
+			}
+			client, err := jsonparser.GetString(value, "Proposal", "Client")
+			if err != nil {
+				return err
+			}
+			pieceSize, err := jsonparser.GetInt(value, "Proposal", "PieceSize")
+			if err != nil {
+				return err
+			}
+			sectorStartEpoch, err := jsonparser.GetInt(value, "State", "SectorStartEpoch")
+			if err != nil {
+				return err
+			}
+			verified, err := jsonparser.GetBoolean(value, "Proposal", "VerifiedDeal")
+			if err != nil {
+				return err
+			}
 
-			provider := v.Proposal.Provider.String()
-			client := v.Proposal.Client.String()
-			pieceSize := v.Proposal.PieceSize
-			sectorStartEpoch := int64(v.State.SectorStartEpoch)
-
-			if v.Proposal.VerifiedDeal && sectorStartEpoch != -1 {
-				if !ContainsInMap(sps, provider) && !ContainsInMap(clients, client) {
-					continue
-				}
+			sum := func() {
 				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
 					if _, ok := sp_deal[provider]; ok {
 						sp_deal[provider][client] += int64(pieceSize)
@@ -115,16 +111,29 @@ var sum = &cli.Command{
 						sp_deal[provider] = map[string]int64{}
 						sp_deal[provider][client] += int64(pieceSize)
 					}
-					totalDc += int64(pieceSize)
+					totalDc += float64(pieceSize)
 				}
-
 			}
-
+			if verified && sectorStartEpoch != -1 {
+				if ctx.IsSet("sp") && ctx.IsSet("client") {
+					if ContainsInMap(sps, provider) && ContainsInMap(clients, client) {
+						sum()
+					}
+				} else {
+					if ContainsInMap(sps, provider) || ContainsInMap(clients, client) {
+						sum()
+					}
+				}
+			}
+			return nil
+		}, "result")
+		if err != nil {
+			return err
 		}
 
 		for sp, v := range sp_deal {
 			for client, piecesize := range v {
-				fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, piecesize/(1<<40))
+				fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
 			}
 		}
 

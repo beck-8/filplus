@@ -3,6 +3,7 @@ module filplus
 go 1.18
 
 require (
+	github.com/buger/jsonparser v1.1.1
 	github.com/filecoin-project/go-state-types v0.9.9
 	github.com/urfave/cli/v2 v2.14.0
 )
