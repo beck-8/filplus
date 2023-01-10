@@ -9,11 +9,12 @@ import (
 func main() {
 
 	app := &cli.App{
-		Name:    "query",
+		Name:    "filplus",
 		Usage:   "A tool to query datacap",
 		Version: UserVersion(),
 		Commands: []*cli.Command{
 			query,
+			sum,
 		},
 	}
 

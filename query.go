@@ -13,20 +13,20 @@ import (
 )
 
 var query = &cli.Command{
-	Name:        "query",
-	Description: "query datacap",
+	Name:  "query",
+	Usage: "query datacap",
 	Flags: []cli.Flag{
 		&cli.StringFlag{
 			Name:     "sp",
-			Value:    "f01877571,f01880047,f01882184,f01878005,f01882177",
-			Usage:    "Specify SP List",
+			Value:    "",
+			Usage:    "specify sp list",
 			Required: false,
 			Aliases:  []string{"s"},
 		},
 		&cli.StringFlag{
 			Name:     "client",
 			Value:    "",
-			Usage:    "Specify Client ID List",
+			Usage:    "specify client id list",
 			Required: true,
 			Aliases:  []string{"c"},
 		},
@@ -82,7 +82,7 @@ var query = &cli.Command{
 			}
 
 		}
-		fmt.Fprintf(w, "Total Datacap:\t%v\n", totalDc/(1<<40))
+		fmt.Fprintf(w, "Total Datacap:\t\t%v\n", totalDc/(1<<40))
 		w.Flush()
 		return nil
 

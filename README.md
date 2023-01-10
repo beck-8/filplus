@@ -11,7 +11,7 @@ make
 make linux
 ```
 
-## 使用
+## 查询使用
 ```bash
 ./filplus query --sp f01877571,f01880047 --client f01860990,f01817237
 
@@ -54,5 +54,46 @@ $ ./filplus query -c f3w4wlayytfmsay6gu5phhij5r4yyx7t4xxrlosgotlmqg5eih3co5atsra
 client                                                                                    sp                datacap(T)
 f3w4wlayytfmsay6gu5phhij5r4yyx7t4xxrlosgotlmqg5eih3co5atsra4h2pe4qd2d6c76bvhj6nwim7lgq    f01132084         0.0146484375
 f3w4wlayytfmsay6gu5phhij5r4yyx7t4xxrlosgotlmqg5eih3co5atsra4h2pe4qd2d6c76bvhj6nwim7lgq    f01169691         0.72314453125
-Total Datacap:                                                                            0.73779296875
+Total Datacap:  
+                                                                          0.73779296875
+```
+## 计算使用
+**从lotus导出deal文件**
+```bash
+curl --location --request POST 'http://10.126.1.15:1234/rpc/v0' --header 'Content-Type: application/json' --data-raw '{
+     "jsonrpc": "2.0",
+     "method": "Filecoin.StateMarketDeals",
+     "params": [
+     [
+     ]
+   ],
+     "id": 1
+   }' >deal.list
+```
+```bash
+$ ./filplus calculate --file ~/Downloads/deal.list -s t01000
+2020-08-25 06:00:00 ~ 2060-08-25 06:00:00
+client            sp                datacap(T)
+t0100             t01000            24
+Total Datacap                       24
+
+$ ./filplus calculate --file ~/Downloads/deal.list -s t01000,t01001
+2020-08-25 06:00:00 ~ 2060-08-25 06:00:00
+client            sp                datacap(T)
+t0100             t01000            24
+t0101             t01001            24
+Total Datacap                       48
+
+$ ./filplus calculate --file ~/Downloads/deal.list -s t01000,t01001 -c t0100
+2020-08-25 06:00:00 ~ 2060-08-25 06:00:00
+client            sp                datacap(T)
+t0100             t01000            24
+Total Datacap                       24
+
+$ ./filplus calculate --file ~/Downloads/deal.list -s t01000,t01001 -c t0100,t0101
+2020-08-25 06:00:00 ~ 2060-08-25 06:00:00
+client            sp                datacap(T)
+t0100             t01000            24
+t0101             t01001            24
+Total Datacap                       48
 ```
