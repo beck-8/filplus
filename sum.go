@@ -65,6 +65,8 @@ var sum = &cli.Command{
 
 		clients := ConvertStrSlice2Map(strings.Split(ctx.String("client"), ","))
 		sps := ConvertStrSlice2Map(strings.Split(ctx.String("sp"), ","))
+		clientsLen := len(clients)
+		spsLen := len(sps)
 
 		file := ctx.String("file")
 		f, err := ioutil.ReadFile(file)
@@ -78,7 +80,7 @@ var sum = &cli.Command{
 		w := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
 			0)
 		fmt.Fprint(w, "client\tsp\tdatacap(T)\n")
-		var totalDc float64
+		var totalDc int64
 
 		//其他json解析方式性能低下，使用jsonparser库8.3G文件花费49s，原生花费4m；python3 原生 3m+,orjson 2m48s。
 		err = jsonparser.ObjectEach(f, func(key []byte, value []byte, dataType jsonparser.ValueType, offset int) error {
@@ -106,16 +108,16 @@ var sum = &cli.Command{
 			sum := func() {
 				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
 					if _, ok := sp_deal[provider]; ok {
-						sp_deal[provider][client] += int64(pieceSize)
+						sp_deal[provider][client] += pieceSize
 					} else {
 						sp_deal[provider] = map[string]int64{}
-						sp_deal[provider][client] += int64(pieceSize)
+						sp_deal[provider][client] += pieceSize
 					}
-					totalDc += float64(pieceSize)
+					totalDc += pieceSize
 				}
 			}
 			if verified && sectorStartEpoch != -1 {
-				if ctx.IsSet("sp") && ctx.IsSet("client") {
+				if spsLen != 0 && clientsLen != 0 {
 					if ContainsInMap(sps, provider) && ContainsInMap(clients, client) {
 						sum()
 					}
@@ -137,7 +139,7 @@ var sum = &cli.Command{
 			}
 		}
 
-		fmt.Fprintf(w, "Total Datacap\t\t%v\n", totalDc/(1<<40))
+		fmt.Fprintf(w, "Total Datacap\t\t%v\n", float64(totalDc)/(1<<40))
 		w.Flush()
 		return nil
 
@@ -160,6 +162,9 @@ func timeToHeight(text string) (int64, error) {
 func ConvertStrSlice2Map(sl []string) map[string]struct{} {
 	set := make(map[string]struct{}, len(sl))
 	for _, v := range sl {
+		if v == "" {
+			continue
+		}
 		set[v] = struct{}{}
 	}
 	return set
