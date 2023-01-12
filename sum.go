@@ -45,6 +45,11 @@ var sum = &cli.Command{
 			Value: "2060-08-25 06:00:00",
 			Usage: "specify end time",
 		},
+		&cli.BoolFlag{
+			Name:  "sum",
+			Value: false,
+			Usage: "summarize the LDN quota",
+		},
 	},
 	Action: func(ctx *cli.Context) error {
 		var startEpoch, endEpoch int64
@@ -77,9 +82,12 @@ var sum = &cli.Command{
 		sp_deal := map[string]map[string]int64{}
 		fmt.Printf("%s ~ %s\n", ctx.String("start"), ctx.String("end"))
 
-		w := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
+		w1 := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
 			0)
-		fmt.Fprint(w, "client\tsp\tdatacap(T)\n")
+		fmt.Fprint(w1, "client\tsp\tdatacap(T)\n")
+		w2 := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
+			0)
+		fmt.Fprintf(w2, "ldn sum\t\tdatacap(T)\n")
 		var totalDc int64
 
 		//其他json解析方式性能低下，使用jsonparser库8.3G文件花费49s，原生花费4m；python3 原生 3m+,orjson 2m48s。
@@ -135,25 +143,34 @@ var sum = &cli.Command{
 
 		if clientsLen == 0 {
 			for client, v := range sp_deal {
+				var sumPiecesize int64 = 0
 				for sp, piecesize := range v {
-					fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+					sumPiecesize += piecesize
+					fmt.Fprintf(w1, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
 				}
+				fmt.Fprintf(w2, "%s\t\t%v\n", client, float64(sumPiecesize)/(1<<40))
 			}
 		} else {
 			for _, client := range strings.Split(ctx.String("client"), ",") {
 				if _, ok := sp_deal[client]; ok {
+					var sumPiecesize int64 = 0
 					for _, sp := range strings.Split(ctx.String("sp"), ",") {
 						if piecesize, ok := sp_deal[client][sp]; ok {
-							fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+							sumPiecesize += piecesize
+							fmt.Fprintf(w1, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
 						}
 					}
+					fmt.Fprintf(w2, "%s\t\t%v\n", client, float64(sumPiecesize)/(1<<40))
 				}
 
 			}
 		}
 
-		fmt.Fprintf(w, "Total Datacap\t\t%v\n", float64(totalDc)/(1<<40))
-		w.Flush()
+		fmt.Fprintf(w1, "Total Datacap\t\t%v\n\n", float64(totalDc)/(1<<40))
+		w1.Flush()
+		if ctx.Bool("sum") {
+			w2.Flush()
+		}
 		return nil
 
 	},
