@@ -107,11 +107,11 @@ var sum = &cli.Command{
 
 			sum := func() {
 				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
-					if _, ok := sp_deal[provider]; ok {
-						sp_deal[provider][client] += pieceSize
+					if _, ok := sp_deal[client]; ok {
+						sp_deal[client][provider] += pieceSize
 					} else {
-						sp_deal[provider] = map[string]int64{}
-						sp_deal[provider][client] += pieceSize
+						sp_deal[client] = map[string]int64{}
+						sp_deal[client][provider] += pieceSize
 					}
 					totalDc += pieceSize
 				}
@@ -133,9 +133,21 @@ var sum = &cli.Command{
 			return err
 		}
 
-		for sp, v := range sp_deal {
-			for client, piecesize := range v {
-				fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+		if clientsLen == 0 {
+			for client, v := range sp_deal {
+				for sp, piecesize := range v {
+					fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+				}
+			}
+		} else {
+			for _, client := range strings.Split(ctx.String("client"), ",") {
+				_, ok := sp_deal[client]
+				if ok {
+					for sp, piecesize := range sp_deal[client] {
+						fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+					}
+				}
+
 			}
 		}
 
