@@ -141,10 +141,11 @@ var sum = &cli.Command{
 			}
 		} else {
 			for _, client := range strings.Split(ctx.String("client"), ",") {
-				_, ok := sp_deal[client]
-				if ok {
-					for sp, piecesize := range sp_deal[client] {
-						fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+				if _, ok := sp_deal[client]; ok {
+					for _, sp := range strings.Split(ctx.String("sp"), ",") {
+						if piecesize, ok := sp_deal[client][sp]; ok {
+							fmt.Fprintf(w, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+						}
 					}
 				}
 
