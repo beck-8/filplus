@@ -141,16 +141,7 @@ var sum = &cli.Command{
 			return err
 		}
 
-		if clientsLen == 0 {
-			for client, v := range sp_deal {
-				var sumPiecesize int64 = 0
-				for sp, piecesize := range v {
-					sumPiecesize += piecesize
-					fmt.Fprintf(w1, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
-				}
-				fmt.Fprintf(w2, "%s\t\t%v\n", client, float64(sumPiecesize)/(1<<40))
-			}
-		} else {
+		if clientsLen != 0 && spsLen != 0 {
 			for _, client := range strings.Split(ctx.String("client"), ",") {
 				if _, ok := sp_deal[client]; ok {
 					var sumPiecesize int64 = 0
@@ -162,7 +153,15 @@ var sum = &cli.Command{
 					}
 					fmt.Fprintf(w2, "%s\t\t%v\n", client, float64(sumPiecesize)/(1<<40))
 				}
-
+			}
+		} else {
+			for client, v := range sp_deal {
+				var sumPiecesize int64 = 0
+				for sp, piecesize := range v {
+					sumPiecesize += piecesize
+					fmt.Fprintf(w1, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
+				}
+				fmt.Fprintf(w2, "%s\t\t%v\n", client, float64(sumPiecesize)/(1<<40))
 			}
 		}
 
