@@ -124,7 +124,17 @@ var sum = &cli.Command{
 			}
 
 			sum := func() {
-				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
+				if pending == false {
+					if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
+						if _, ok := spDeal[client]; ok {
+							spDeal[client][provider] += pieceSize
+						} else {
+							spDeal[client] = map[string]int64{}
+							spDeal[client][provider] += pieceSize
+						}
+						totalDc += pieceSize
+					}
+				} else {
 					if _, ok := spDeal[client]; ok {
 						spDeal[client][provider] += pieceSize
 					} else {
@@ -133,6 +143,7 @@ var sum = &cli.Command{
 					}
 					totalDc += pieceSize
 				}
+
 			}
 
 			var judgment bool
