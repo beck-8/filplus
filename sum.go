@@ -50,10 +50,20 @@ var sum = &cli.Command{
 			Value: false,
 			Usage: "summarize the LDN quota",
 		},
+		&cli.BoolFlag{
+			Name:  "pending",
+			Value: false,
+			Usage: "include pending：after publish",
+		},
 	},
 	Action: func(ctx *cli.Context) error {
 		var startEpoch, endEpoch int64
 		var err error
+
+		pending := ctx.Bool("pending")
+		if pending && ctx.IsSet("start") || ctx.IsSet("end") {
+			return fmt.Errorf("the pending parameter is not allowed to be used with start or end")
+		}
 
 		if start := ctx.String("start"); start != "" {
 			startEpoch, err = timeToHeight(start)
@@ -79,7 +89,7 @@ var sum = &cli.Command{
 			return err
 		}
 
-		sp_deal := map[string]map[string]int64{}
+		spDeal := map[string]map[string]int64{}
 		fmt.Printf("%s ~ %s\n", ctx.String("start"), ctx.String("end"))
 
 		w1 := tabwriter.NewWriter(os.Stdout, 18, 0, 4, ' ',
@@ -115,16 +125,23 @@ var sum = &cli.Command{
 
 			sum := func() {
 				if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
-					if _, ok := sp_deal[client]; ok {
-						sp_deal[client][provider] += pieceSize
+					if _, ok := spDeal[client]; ok {
+						spDeal[client][provider] += pieceSize
 					} else {
-						sp_deal[client] = map[string]int64{}
-						sp_deal[client][provider] += pieceSize
+						spDeal[client] = map[string]int64{}
+						spDeal[client][provider] += pieceSize
 					}
 					totalDc += pieceSize
 				}
 			}
-			if verified && sectorStartEpoch != -1 {
+
+			var judgment bool
+			if pending == false {
+				judgment = verified && sectorStartEpoch != -1
+			} else {
+				judgment = verified
+			}
+			if judgment {
 				if spsLen != 0 && clientsLen != 0 {
 					if ContainsInMap(sps, provider) && ContainsInMap(clients, client) {
 						sum()
@@ -135,6 +152,7 @@ var sum = &cli.Command{
 					}
 				}
 			}
+
 			return nil
 		}, "result")
 		if err != nil {
@@ -143,10 +161,10 @@ var sum = &cli.Command{
 
 		if clientsLen != 0 && spsLen != 0 {
 			for _, client := range strings.Split(ctx.String("client"), ",") {
-				if _, ok := sp_deal[client]; ok {
+				if _, ok := spDeal[client]; ok {
 					var sumPiecesize int64 = 0
 					for _, sp := range strings.Split(ctx.String("sp"), ",") {
-						if piecesize, ok := sp_deal[client][sp]; ok {
+						if piecesize, ok := spDeal[client][sp]; ok {
 							sumPiecesize += piecesize
 							fmt.Fprintf(w1, "%s\t%s\t%v\n", client, sp, float64(piecesize)/(1<<40))
 						}
@@ -155,7 +173,7 @@ var sum = &cli.Command{
 				}
 			}
 		} else {
-			for client, v := range sp_deal {
+			for client, v := range spDeal {
 				var sumPiecesize int64 = 0
 				for sp, piecesize := range v {
 					sumPiecesize += piecesize
