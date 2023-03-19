@@ -61,8 +61,10 @@ var sum = &cli.Command{
 		var err error
 
 		pending := ctx.Bool("pending")
-		if pending && ctx.IsSet("start") || ctx.IsSet("end") {
-			return fmt.Errorf("the pending parameter is not allowed to be used with start or end")
+		if pending {
+			if ctx.IsSet("start") || ctx.IsSet("end") {
+				return fmt.Errorf("the pending parameter is not allowed to be used with start or end")
+			}
 		}
 
 		if start := ctx.String("start"); start != "" {
