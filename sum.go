@@ -1,14 +1,15 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
-	"github.com/buger/jsonparser"
-	"github.com/urfave/cli/v2"
-	"io/ioutil"
+	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/urfave/cli/v2"
 )
 
 var sum = &cli.Command{
@@ -85,11 +86,51 @@ var sum = &cli.Command{
 		clientsLen := len(clients)
 		spsLen := len(sps)
 
-		file := ctx.String("file")
-		f, err := ioutil.ReadFile(file)
-		if err != nil {
-			return err
+		// Proposal 定义 Proposal 结构体
+		type Proposal struct {
+			PieceCID             map[string]string `json:"PieceCID"`
+			PieceSize            int64             `json:"PieceSize"`
+			VerifiedDeal         bool              `json:"VerifiedDeal"`
+			Client               string            `json:"Client"`
+			Provider             string            `json:"Provider"`
+			Label                string            `json:"Label"`
+			StartEpoch           int64             `json:"StartEpoch"`
+			EndEpoch             int64             `json:"EndEpoch"`
+			StoragePricePerEpoch string            `json:"StoragePricePerEpoch"`
+			ProviderCollateral   string            `json:"ProviderCollateral"`
+			ClientCollateral     string            `json:"ClientCollateral"`
 		}
+
+		// State 定义 State 结构体
+		type State struct {
+			SectorNumber     int64 `json:"SectorNumber"`
+			SectorStartEpoch int64 `json:"SectorStartEpoch"`
+			LastUpdatedEpoch int64 `json:"LastUpdatedEpoch"`
+			SlashEpoch       int64 `json:"SlashEpoch"`
+		}
+
+		// Entry 定义 result 中的键值对
+		type Entry struct {
+			Proposal Proposal `json:"Proposal"`
+			State    State    `json:"State"`
+		}
+
+		// Response 定义整个 JSON 结构
+		type Response struct {
+			ID      int              `json:"id"`
+			JSONRPC string           `json:"jsonrpc"`
+			Result  map[string]Entry `json:"result"`
+		}
+
+		file, err := os.Open(ctx.String("file"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "打开文件失败: %v\n", err)
+			os.Exit(1)
+		}
+		defer file.Close()
+
+		// 创建 json.Decoder
+		decoder := json.NewDecoder(file)
 
 		spDeal := map[string]map[string]int64{}
 		fmt.Printf("%s ~ %s\n", ctx.String("start"), ctx.String("end"))
@@ -102,74 +143,90 @@ var sum = &cli.Command{
 		fmt.Fprintf(w2, "ldn sum\t\tdatacap(T)\n")
 		var totalDc int64
 
-		//其他json解析方式性能低下，使用jsonparser库8.3G文件花费49s，原生花费4m；python3 原生 3m+,orjson 2m48s。
-		err = jsonparser.ObjectEach(f, func(key []byte, value []byte, dataType jsonparser.ValueType, offset int) error {
-			provider, err := jsonparser.GetString(value, "Proposal", "Provider")
-			if err != nil {
-				return err
+		// 读取 JSON 令牌
+		for {
+			// 读取下一个 JSON 令牌
+			token, err := decoder.Token()
+			if err == io.EOF {
+				break // 文件结束
 			}
-			client, err := jsonparser.GetString(value, "Proposal", "Client")
 			if err != nil {
-				return err
-			}
-			pieceSize, err := jsonparser.GetInt(value, "Proposal", "PieceSize")
-			if err != nil {
-				return err
-			}
-			sectorStartEpoch, err := jsonparser.GetInt(value, "State", "SectorStartEpoch")
-			if err != nil {
-				return err
-			}
-			verified, err := jsonparser.GetBoolean(value, "Proposal", "VerifiedDeal")
-			if err != nil {
-				return err
+				fmt.Fprintf(os.Stderr, "读取令牌失败: %v\n", err)
+				os.Exit(1)
 			}
 
-			sum := func() {
-				if pending == false {
-					if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
-						if _, ok := spDeal[client]; ok {
-							spDeal[client][provider] += pieceSize
+			// 检查是否进入 result 对象
+			if token == "result" {
+				// 读取 result 对象的开始括号
+				if _, err := decoder.Token(); err != nil {
+					fmt.Fprintf(os.Stderr, "读取 result 开始括号失败: %v\n", err)
+					os.Exit(1)
+				}
+
+				// 逐个处理 result 中的键值对
+				for decoder.More() {
+					// 读取键（例如 "100000000"）
+					_, err := decoder.Token()
+					if err != nil {
+						fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
+						os.Exit(1)
+					}
+
+					// 解码对应的 Entry 对象
+					var entry Entry
+					if err := decoder.Decode(&entry); err != nil {
+						fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
+						os.Exit(1)
+					}
+
+					provider := entry.Proposal.Provider
+					client := entry.Proposal.Client
+					pieceSize := entry.Proposal.PieceSize
+					sectorStartEpoch := entry.Proposal.StartEpoch
+					verified := entry.Proposal.VerifiedDeal
+
+					sum := func() {
+						if !pending {
+							if sectorStartEpoch >= startEpoch && sectorStartEpoch <= endEpoch {
+								if _, ok := spDeal[client]; ok {
+									spDeal[client][provider] += pieceSize
+								} else {
+									spDeal[client] = map[string]int64{}
+									spDeal[client][provider] += pieceSize
+								}
+								totalDc += pieceSize
+							}
 						} else {
-							spDeal[client] = map[string]int64{}
-							spDeal[client][provider] += pieceSize
+							if _, ok := spDeal[client]; ok {
+								spDeal[client][provider] += pieceSize
+							} else {
+								spDeal[client] = map[string]int64{}
+								spDeal[client][provider] += pieceSize
+							}
+							totalDc += pieceSize
 						}
-						totalDc += pieceSize
+
 					}
-				} else {
-					if _, ok := spDeal[client]; ok {
-						spDeal[client][provider] += pieceSize
+
+					var judgment bool
+					if !pending {
+						judgment = verified && sectorStartEpoch != -1
 					} else {
-						spDeal[client] = map[string]int64{}
-						spDeal[client][provider] += pieceSize
+						judgment = verified
 					}
-					totalDc += pieceSize
-				}
-
-			}
-
-			var judgment bool
-			if pending == false {
-				judgment = verified && sectorStartEpoch != -1
-			} else {
-				judgment = verified
-			}
-			if judgment {
-				if spsLen != 0 && clientsLen != 0 {
-					if ContainsInMap(sps, provider) && ContainsInMap(clients, client) {
-						sum()
-					}
-				} else {
-					if ContainsInMap(sps, provider) || ContainsInMap(clients, client) {
-						sum()
+					if judgment {
+						if spsLen != 0 && clientsLen != 0 {
+							if ContainsInMap(sps, provider) && ContainsInMap(clients, client) {
+								sum()
+							}
+						} else {
+							if ContainsInMap(sps, provider) || ContainsInMap(clients, client) {
+								sum()
+							}
+						}
 					}
 				}
 			}
-
-			return nil
-		}, "result")
-		if err != nil {
-			return err
 		}
 
 		if clientsLen != 0 && spsLen != 0 {
