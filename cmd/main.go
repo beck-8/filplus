@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Proposal 定义 Proposal 结构体
@@ -44,65 +45,103 @@ type Response struct {
 }
 
 func main() {
-	// 打开大 JSON 文件
-	file, err := os.Open("deal.list")
+	// 打开 zstd 压缩文件
+	file, err := os.Open("D:/tmp/StateMarketDeals.json.zst")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "打开文件失败: %v\n", err)
 		os.Exit(1)
 	}
 	defer file.Close()
 
-	// 创建 json.Decoder
-	decoder := json.NewDecoder(file)
+	// 创建 zstd 解压器
+	zstdReader, err := zstd.NewReader(file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "创建zstd解压器失败: %v\n", err)
+		os.Exit(1)
+	}
+	defer zstdReader.Close()
 
-	// 读取 JSON 令牌
-	for {
-		// 读取下一个 JSON 令牌
-		token, err := decoder.Token()
-		if err == io.EOF {
-			break // 文件结束
-		}
+	// 创建 json.Decoder（从zstd解压流读取）
+	decoder := json.NewDecoder(zstdReader)
+
+	// zstd文件结构直接是 map[string]Entry
+	// 读取开始的 '{'
+	if _, err := decoder.Token(); err != nil {
+		fmt.Fprintf(os.Stderr, "读取开始括号失败: %v\n", err)
+		os.Exit(1)
+	}
+
+	// 逐个处理键值对
+	for decoder.More() {
+		// 读取键（例如 "100000000"）
+		key, err := decoder.Token()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "读取令牌失败: %v\n", err)
+			fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
 			os.Exit(1)
 		}
 
-		// 检查是否进入 result 对象
-		if token == "result" {
-			// 读取 result 对象的开始括号
-			if _, err := decoder.Token(); err != nil {
-				fmt.Fprintf(os.Stderr, "读取 result 开始括号失败: %v\n", err)
-				os.Exit(1)
-			}
+		// 解码对应的 Entry 对象
+		var entry Entry
+		if err := decoder.Decode(&entry); err != nil {
+			fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
+			os.Exit(1)
+		}
 
-			// 逐个处理 result 中的键值对
-			for decoder.More() {
-				// 读取键（例如 "100000000"）
-				_, err := decoder.Token()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
-					os.Exit(1)
-				}
-
-				// 解码对应的 Entry 对象
-				var entry Entry
-				if err := decoder.Decode(&entry); err != nil {
-					fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
-					os.Exit(1)
-				}
-
-				// 筛选后续逻辑
-				// 筛选 EndEpoch < 5098759
-				if entry.Proposal.EndEpoch < 5098759 {
-					// fmt.Printf("Key: %v, Entry: %+v\n", key, entry)
-					d, _ := json.Marshal(entry)
-					fmt.Println(string(d))
-					// 可选：将结果写入文件
-					// writeToFile(key, entry)
-				}
-			}
+		// 筛选后续逻辑
+		// 筛选 EndEpoch < 5098759
+		if entry.Proposal.Provider == "f03091738" || entry.Proposal.Provider == "f0xx" {
+			d, _ := json.Marshal(entry)
+			fmt.Println(key, string(d))
+			// 可选：将结果写入文件
+			// writeToFile(key, entry)
 		}
 	}
+
+	// 以下是旧的处理 Response 结构（包含 id, jsonrpc, result）的逻辑，已不再需要
+	// // 读取 JSON 令牌
+	// for {
+	// 	// 读取下一个 JSON 令牌
+	// 	token, err := decoder.Token()
+	// 	if err == io.EOF {
+	// 		break // 文件结束
+	// 	}
+	// 	if err != nil {
+	// 		fmt.Fprintf(os.Stderr, "读取令牌失败: %v\n", err)
+	// 		os.Exit(1)
+	// 	}
+	//
+	// 	// 检查是否进入 result 对象
+	// 	if token == "result" {
+	// 		// 读取 result 对象的开始括号
+	// 		if _, err := decoder.Token(); err != nil {
+	// 			fmt.Fprintf(os.Stderr, "读取 result 开始括号失败: %v\n", err)
+	// 			os.Exit(1)
+	// 		}
+	//
+	// 		// 逐个处理 result 中的键值对
+	// 		for decoder.More() {
+	// 			// 读取键（例如 "100000000"）
+	// 			_, err := decoder.Token()
+	// 			if err != nil {
+	// 				fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
+	// 				os.Exit(1)
+	// 			}
+	//
+	// 			// 解码对应的 Entry 对象
+	// 			var entry Entry
+	// 			if err := decoder.Decode(&entry); err != nil {
+	// 				fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
+	// 				os.Exit(1)
+	// 			}
+	//
+	// 			// 筛选后续逻辑
+	// 			if entry.Proposal.Provider == "f03091738" {
+	// 				d, _ := json.Marshal(entry)
+	// 				fmt.Println(string(d))
+	// 			}
+	// 		}
+	// 	}
+	// }
 }
 
 // 可选：将结果写入文件的函数
