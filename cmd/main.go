@@ -1,10 +1,15 @@
 package main
 
 import (
-	"encoding/json"
+	"bufio"
+	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"sync"
+	"sync/atomic"
 
+	json "github.com/goccy/go-json"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -31,22 +36,26 @@ type State struct {
 	SlashEpoch       int64 `json:"SlashEpoch"`
 }
 
-// Entry 定义 result 中的键值对
-type Entry struct {
+// NDJSONEntry NDJSON 格式的条目
+type NDJSONEntry struct {
+	DealID   int64    `json:"DealID"`
 	Proposal Proposal `json:"Proposal"`
 	State    State    `json:"State"`
 }
 
-// Response 定义整个 JSON 结构
-type Response struct {
-	ID      int              `json:"id"`
-	JSONRPC string           `json:"jsonrpc"`
-	Result  map[string]Entry `json:"result"`
-}
+// 筛选条件函数类型
+type FilterFunc func(entry *NDJSONEntry) bool
 
 func main() {
+	// 命令行参数
+	// https://marketdeals.s3.ap-northeast-1.amazonaws.com/StateMarketDeals.ndjson.zst
+	inputFile := flag.String("input", "D:/tmp/StateMarketDeals.ndjson.zst", "输入文件路径 (zstd 压缩的 NDJSON)")
+	workers := flag.Int("workers", runtime.NumCPU(), "并发 worker 数量")
+	provider := flag.String("provider", "", "筛选指定 Provider (可选)")
+	flag.Parse()
+
 	// 打开 zstd 压缩文件
-	file, err := os.Open("D:/tmp/StateMarketDeals.json.zst")
+	file, err := os.Open(*inputFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "打开文件失败: %v\n", err)
 		os.Exit(1)
@@ -61,107 +70,97 @@ func main() {
 	}
 	defer zstdReader.Close()
 
-	// 创建 json.Decoder（从zstd解压流读取）
-	decoder := json.NewDecoder(zstdReader)
+	// 构建筛选函数
+	filter := buildFilter(*provider)
 
-	// zstd文件结构直接是 map[string]Entry
-	// 读取开始的 '{'
-	if _, err := decoder.Token(); err != nil {
-		fmt.Fprintf(os.Stderr, "读取开始括号失败: %v\n", err)
-		os.Exit(1)
-	}
-
-	// 逐个处理键值对
-	for decoder.More() {
-		// 读取键（例如 "100000000"）
-		key, err := decoder.Token()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
-			os.Exit(1)
-		}
-
-		// 解码对应的 Entry 对象
-		var entry Entry
-		if err := decoder.Decode(&entry); err != nil {
-			fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
-			os.Exit(1)
-		}
-
-		// 筛选后续逻辑
-		// 筛选 EndEpoch < 5098759
-		if entry.Proposal.Provider == "f03091738" || entry.Proposal.Provider == "f0xx" {
-			d, _ := json.Marshal(entry)
-			fmt.Println(key, string(d))
-			// 可选：将结果写入文件
-			// writeToFile(key, entry)
-		}
-	}
-
-	// 以下是旧的处理 Response 结构（包含 id, jsonrpc, result）的逻辑，已不再需要
-	// // 读取 JSON 令牌
-	// for {
-	// 	// 读取下一个 JSON 令牌
-	// 	token, err := decoder.Token()
-	// 	if err == io.EOF {
-	// 		break // 文件结束
-	// 	}
-	// 	if err != nil {
-	// 		fmt.Fprintf(os.Stderr, "读取令牌失败: %v\n", err)
-	// 		os.Exit(1)
-	// 	}
-	//
-	// 	// 检查是否进入 result 对象
-	// 	if token == "result" {
-	// 		// 读取 result 对象的开始括号
-	// 		if _, err := decoder.Token(); err != nil {
-	// 			fmt.Fprintf(os.Stderr, "读取 result 开始括号失败: %v\n", err)
-	// 			os.Exit(1)
-	// 		}
-	//
-	// 		// 逐个处理 result 中的键值对
-	// 		for decoder.More() {
-	// 			// 读取键（例如 "100000000"）
-	// 			_, err := decoder.Token()
-	// 			if err != nil {
-	// 				fmt.Fprintf(os.Stderr, "读取键失败: %v\n", err)
-	// 				os.Exit(1)
-	// 			}
-	//
-	// 			// 解码对应的 Entry 对象
-	// 			var entry Entry
-	// 			if err := decoder.Decode(&entry); err != nil {
-	// 				fmt.Fprintf(os.Stderr, "解码 Entry 失败: %v\n", err)
-	// 				os.Exit(1)
-	// 			}
-	//
-	// 			// 筛选后续逻辑
-	// 			if entry.Proposal.Provider == "f03091738" {
-	// 				d, _ := json.Marshal(entry)
-	// 				fmt.Println(string(d))
-	// 			}
-	// 		}
-	// 	}
-	// }
+	// 使用并发处理
+	processWithWorkers(zstdReader, *workers, filter)
 }
 
-// 可选：将结果写入文件的函数
-func writeToFile(key interface{}, entry Entry) {
-	outputFile, err := os.OpenFile("output.json", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "打开输出文件失败: %v\n", err)
-		return
+// buildFilter 构建筛选函数
+func buildFilter(provider string) FilterFunc {
+	return func(entry *NDJSONEntry) bool {
+		// 如果指定了 provider，只匹配该 provider
+		if provider != "" {
+			return entry.Proposal.Provider == provider
+		}
+		// 默认筛选条件
+		return entry.Proposal.Provider == "f03091738" || entry.Proposal.Provider == "f0xx"
 	}
-	defer outputFile.Close()
+}
 
-	// 格式化输出
-	// data := map[string]interface{}{"key": key, "entry": entry}
-	jsonData, err := json.MarshalIndent(entry, "", "  ")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "序列化输出失败: %v\n", err)
-		return
+// processWithWorkers 使用 worker pool 并发处理
+func processWithWorkers(reader *zstd.Decoder, numWorkers int, filter FilterFunc) {
+	// 行读取 channel
+	lines := make(chan []byte, numWorkers*100)
+	// 结果 channel
+	results := make(chan string, numWorkers*100)
+
+	var wg sync.WaitGroup
+	var processedCount atomic.Int64
+	var matchedCount atomic.Int64
+
+	// 启动 worker goroutines
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for line := range lines {
+				processedCount.Add(1)
+
+				var entry NDJSONEntry
+				if err := json.Unmarshal(line, &entry); err != nil {
+					// 跳过解析失败的行
+					continue
+				}
+
+				// 应用筛选条件
+				if filter(&entry) {
+					matchedCount.Add(1)
+					// 重新序列化输出
+					output, _ := json.Marshal(entry)
+					results <- string(output)
+				}
+			}
+		}()
 	}
 
-	if _, err := outputFile.WriteString(string(jsonData) + "\n"); err != nil {
-		fmt.Fprintf(os.Stderr, "写入文件失败: %v\n", err)
+	// 启动结果输出 goroutine
+	var outputWg sync.WaitGroup
+	outputWg.Add(1)
+	go func() {
+		defer outputWg.Done()
+		for result := range results {
+			fmt.Println(result)
+		}
+	}()
+
+	// 读取文件并分发给 workers
+	scanner := bufio.NewScanner(reader)
+	// 增大缓冲区以处理长行
+	buf := make([]byte, 0, 1024*1024)
+	scanner.Buffer(buf, 10*1024*1024)
+
+	for scanner.Scan() {
+		// 复制行数据，因为 scanner.Bytes() 返回的切片会被复用
+		line := make([]byte, len(scanner.Bytes()))
+		copy(line, scanner.Bytes())
+		lines <- line
 	}
+
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintf(os.Stderr, "读取文件错误: %v\n", err)
+	}
+
+	// 关闭 lines channel，等待 workers 完成
+	close(lines)
+	wg.Wait()
+
+	// 关闭 results channel，等待输出完成
+	close(results)
+	outputWg.Wait()
+
+	// 输出统计信息
+	fmt.Fprintf(os.Stderr, "\n处理完成: 共处理 %d 条, 匹配 %d 条\n",
+		processedCount.Load(), matchedCount.Load())
 }
